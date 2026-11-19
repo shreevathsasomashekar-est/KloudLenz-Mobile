@@ -1,326 +1,236 @@
-import { MaterialIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { Formik } from "formik";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
-import * as Yup from "yup";
-import {
-  getStoredFCMToken,
-  isReadyForRegistration,
-  setUserId,
-} from "../../services/fcmTokenManager";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { F, T } from "../../constants/theme";
+import { getStoredFCMToken, isReadyForRegistration, setUserId } from "../../services/fcmTokenManager";
 import { mockApi } from "../../services/mockApi";
+import { setCurrentUser } from "../../services/session";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [emailFocused, setEmailFocused] = useState(false);
-  const [passwordFocused, setPasswordFocused] = useState(false);
-  // loading state for submission
-  const [isLoading, setIsLoading] = useState(false);
-  // Formik will hold email/password values
+  const insets = useSafeAreaInsets();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [focused, setFocused] = useState<"email" | "password" | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const validationSchema = Yup.object().shape({
-    email: Yup.string()
-      .email("Invalid email")
-      .required("Enterprise email is required"),
-    password: Yup.string().required("Password is required"),
-  });
+  const emailValid = EMAIL_RE.test(email.trim());
+  const canSubmit = emailValid && password.length > 0 && !loading;
 
-  // Note: submission is handled by Formik's onSubmit below
+  const submit = async () => {
+    if (!canSubmit) return;
+    setLoading(true);
+    setError(null);
+    const userEmail = email.trim().toLowerCase();
+    try {
+      const user = await mockApi.login(userEmail, password);
+      setCurrentUser(user);
+      setUserId(userEmail);
+      const token = getStoredFCMToken();
+      if (token && isReadyForRegistration()) {
+        mockApi.registerDeviceToken(userEmail, token).catch((e) => console.log("Device token registration failed:", e));
+      }
+      router.replace("/(dashboard)");
+    } catch (e) {
+      setError(typeof e === "string" && !/server error/i.test(e) ? e : "Incorrect email or password.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.loginBox}>
-        <Image
-          source={require("../../assets/images/kloudlenz_white_logo.png")}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-        <Text style={styles.subtitle}>Approval Management</Text>
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <StatusBar barStyle="light-content" backgroundColor={T.brand} />
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" bounces={false}>
+        <View style={[styles.hero, { paddingTop: insets.top + 36 }]}>
+          <View style={styles.heroBadge}>
+            <MaterialCommunityIcons name="shield-check-outline" size={14} color={T.white} />
+            <Text style={styles.heroBadgeText}>Approver console</Text>
+          </View>
+          <Text style={styles.heroTitle}>Review and approve{"\n"}billing changes</Text>
+          <Text style={styles.heroSub}>Refunds, plan changes and cancellations from your customers, in one place.</Text>
+        </View>
 
-        <View style={styles.form}>
-          <Formik
-            initialValues={{ email: "", password: "" }}
-            validationSchema={validationSchema}
-            onSubmit={async (values: any, { setSubmitting }: any) => {
-              setIsLoading(true);
-              try {
-                console.log("🔑 Attempting login...");
-                console.log("   Email:", values.email);
-                console.log(
-                  "   Backend:",
-                  "https://calculably-noncretaceous-georgene.ngrok-free.dev/api/v1/account/login",
-                );
+        <View style={styles.card}>
+          <Image source={require("../../assets/images/kloudlenz_white_logo.png")} style={styles.logo} resizeMode="contain" />
+          <Text style={styles.cardTitle}>Sign in</Text>
+          <Text style={styles.cardSub}>Use your Estuate enterprise account</Text>
 
-                await mockApi.login(values.email, values.password);
-                console.log("✅ Login successful");
+          <Text style={styles.label}>Email</Text>
+          <View style={[styles.inputRow, focused === "email" && styles.inputFocused]}>
+            <MaterialCommunityIcons name="email-outline" size={19} color={focused === "email" ? T.brand : T.text3} />
+            <TextInput
+              style={styles.input}
+              placeholder="name@company.com"
+              placeholderTextColor={T.text3}
+              value={email}
+              onChangeText={(v) => {
+                setEmail(v);
+                setError(null);
+              }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              editable={!loading}
+              returnKeyType="next"
+              onFocus={() => setFocused("email")}
+              onBlur={() => setFocused(null)}
+            />
+          </View>
+          {email.length > 3 && !emailValid && focused !== "email" && (
+            <Text style={styles.fieldError}>Enter a valid email address</Text>
+          )}
 
-                // Use email as user ID for FCM token registration
-                setUserId(values.email);
+          <Text style={styles.label}>Password</Text>
+          <View style={[styles.inputRow, focused === "password" && styles.inputFocused]}>
+            <MaterialCommunityIcons name="lock-outline" size={19} color={focused === "password" ? T.brand : T.text3} />
+            <TextInput
+              style={styles.input}
+              placeholder="Your password"
+              placeholderTextColor={T.text3}
+              value={password}
+              onChangeText={(v) => {
+                setPassword(v);
+                setError(null);
+              }}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              editable={!loading}
+              returnKeyType="go"
+              onSubmitEditing={submit}
+              onFocus={() => setFocused("password")}
+              onBlur={() => setFocused(null)}
+            />
+            <Pressable onPress={() => setShowPassword((s) => !s)} hitSlop={10} accessibilityLabel={showPassword ? "Hide password" : "Show password"}>
+              <MaterialCommunityIcons name={showPassword ? "eye-off-outline" : "eye-outline"} size={19} color={T.text3} />
+            </Pressable>
+          </View>
 
-                // Register FCM token if available
-                const storedToken = getStoredFCMToken();
-                if (storedToken && isReadyForRegistration()) {
-                  try {
-                    console.log("📱 Registering device token with backend...");
-                    await mockApi.registerDeviceToken(
-                      values.email,
-                      storedToken,
-                    );
-                    console.log("✅ Device token registered successfully");
-                  } catch (tokenError) {
-                    console.warn(
-                      "⚠️ Failed to register device token:",
-                      tokenError,
-                    );
-                    // Don't block login if token registration fails
-                  }
-                }
+          {!!error && (
+            <View style={styles.errorBox}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={16} color={T.red} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
 
-                // Navigate to dashboard
-                router.push("/(dashboard)");
-              } catch (err) {
-                Alert.alert("Login Failed", "Invalid credentials");
-                console.error("Login error:", err);
-              } finally {
-                setIsLoading(false);
-                setSubmitting(false);
-              }
-            }}
+          <Pressable
+            style={({ pressed }) => [styles.button, !canSubmit && styles.buttonDisabled, pressed && canSubmit && styles.buttonPressed]}
+            onPress={submit}
+            disabled={!canSubmit}
           >
-            {({
-              handleChange,
-              handleBlur,
-              handleSubmit,
-              values,
-              errors,
-              touched,
-              isValid,
-              dirty,
-            }: any) => (
+            {loading ? (
+              <ActivityIndicator color={T.white} />
+            ) : (
               <>
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Enterprise email</Text>
-                  <View
-                    style={[
-                      styles.inputRow,
-                      emailFocused && styles.inputFocused,
-                    ]}
-                  >
-                    <MaterialIcons
-                      name="mail-outline"
-                      size={20}
-                      color="#666"
-                      style={styles.icon}
-                    />
-                    <TextInput
-                      style={styles.inputWithIcon}
-                      placeholder="Enter your enterprise email"
-                      value={values.email}
-                      onChangeText={handleChange("email")}
-                      editable={!isLoading}
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      onFocus={() => setEmailFocused(true)}
-                      onBlur={() => {
-                        handleBlur("email");
-                        setEmailFocused(false);
-                      }}
-                    />
-                  </View>
-                  {touched.email && errors.email ? (
-                    <Text style={styles.errorText}>{errors.email}</Text>
-                  ) : null}
-                </View>
-
-                <View style={styles.inputContainer}>
-                  <Text style={styles.label}>Password</Text>
-                  <View
-                    style={[
-                      styles.inputRow,
-                      passwordFocused && styles.inputFocused,
-                    ]}
-                  >
-                    <MaterialIcons
-                      name="lock-outline"
-                      size={20}
-                      color="#666"
-                      style={styles.icon}
-                    />
-                    <TextInput
-                      style={styles.inputWithIcon}
-                      placeholder="Enter your password"
-                      value={values.password}
-                      onChangeText={handleChange("password")}
-                      editable={!isLoading}
-                      secureTextEntry={true}
-                      onFocus={() => setPasswordFocused(true)}
-                      onBlur={() => {
-                        handleBlur("password");
-                        setPasswordFocused(false);
-                      }}
-                    />
-                  </View>
-                  {touched.password && errors.password ? (
-                    <Text style={styles.errorText}>{errors.password}</Text>
-                  ) : null}
-                  <View style={styles.forgotContainer}>
-                    <TouchableOpacity onPress={() => {}} disabled={true}>
-                      <Text style={styles.forgotText}>Forgot password?</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    (isLoading || !isValid || !dirty) && styles.buttonDisabled,
-                  ]}
-                  onPress={handleSubmit as any}
-                  disabled={isLoading || !isValid || !dirty}
-                >
-                  {isLoading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Login</Text>
-                  )}
-                </TouchableOpacity>
+                <Text style={styles.buttonText}>Sign in</Text>
+                <MaterialCommunityIcons name="arrow-right" size={18} color={T.white} />
               </>
             )}
-          </Formik>
+          </Pressable>
         </View>
-      </View>
-    </View>
+
+        <Text style={[styles.footer, { marginBottom: insets.bottom + 20 }]}>KloudLenz · by Estuate</Text>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-    justifyContent: "center",
+  root: { flex: 1, backgroundColor: T.pageBg },
+  scroll: { flexGrow: 1 },
+  hero: {
+    backgroundColor: T.brand,
+    paddingHorizontal: 24,
+    paddingBottom: 84,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+  },
+  heroBadge: {
+    flexDirection: "row",
     alignItems: "center",
-    padding: 20,
+    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderRadius: T.pillRadius,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
-  loginBox: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 30,
-    width: "100%",
-    maxWidth: 400,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#1976d2",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  logo: {
-    width: 180,
-    height: 40,
-    alignSelf: "center",
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 30,
-  },
-  form: {
-    gap: 16,
-  },
-  inputContainer: {
-    gap: 8,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#c41230",
-  },
-  input: {
+  heroBadgeText: { fontFamily: F.semibold, fontSize: 11.5, color: T.white, letterSpacing: 0.3 },
+  heroTitle: { fontFamily: F.bold, fontSize: 27, lineHeight: 34, color: T.white, marginTop: 18 },
+  heroSub: { fontFamily: F.regular, fontSize: 14, lineHeight: 20, color: "rgba(255,255,255,0.82)", marginTop: 10 },
+  card: {
+    backgroundColor: T.surface,
+    marginHorizontal: 16,
+    marginTop: -56,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#c41230",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: "#333",
-    backgroundColor: "#f9f9f9",
+    borderColor: T.cardBorder,
+    padding: 22,
+    shadowColor: "#101828",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
+  logo: { width: 150, height: 34, marginBottom: 18 },
+  cardTitle: { fontFamily: F.bold, fontSize: 20, color: T.text },
+  cardSub: { fontFamily: F.regular, fontSize: 13, color: T.text2, marginTop: 4, marginBottom: 8 },
+  label: { fontFamily: F.semibold, fontSize: 12, color: T.text2, marginTop: 14, marginBottom: 6 },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
+    height: 50,
     borderWidth: 1,
-    borderColor: "#c41230",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    backgroundColor: "#f9f9f9",
+    borderColor: T.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    backgroundColor: "#fafbfc",
   },
-  icon: {
-    marginHorizontal: 6,
-  },
-  inputWithIcon: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 6,
-    fontSize: 14,
-    color: "#333",
-  },
-  inputFocused: {
-    borderWidth: 2,
-    borderColor: "#c41230",
-  },
-  button: {
-    backgroundColor: "#c41230",
-    paddingVertical: 14,
-    borderRadius: 8,
+  inputFocused: { borderColor: T.brand, backgroundColor: T.surface },
+  input: { flex: 1, height: "100%", fontFamily: F.regular, fontSize: 15, color: T.text },
+  fieldError: { fontFamily: F.regular, fontSize: 12, color: T.red, marginTop: 6 },
+  errorBox: {
+    flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
+    gap: 8,
+    backgroundColor: T.redBg,
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 14,
   },
-  buttonDisabled: {
-    backgroundColor: "#ccc",
+  errorText: { flex: 1, fontFamily: F.medium, fontSize: 13, color: T.red },
+  button: {
+    flexDirection: "row",
+    gap: 8,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: T.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 22,
   },
-  buttonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  hint: {
-    fontSize: 12,
-    color: "#999",
-    textAlign: "center",
-    marginTop: 8,
-    fontStyle: "italic",
-  },
-  forgotContainer: {
-    alignItems: "flex-end",
-    marginTop: 8,
-  },
-  forgotText: {
-    fontSize: 12,
-    color: "#c41230",
-    fontWeight: "600",
-  },
-  errorText: {
-    color: "#d32f2f",
-    fontSize: 12,
-    marginTop: 6,
-  },
+  buttonPressed: { backgroundColor: T.brandHover },
+  buttonDisabled: { opacity: 0.4 },
+  buttonText: { fontFamily: F.semibold, fontSize: 16, color: T.white },
+  footer: { fontFamily: F.medium, fontSize: 12, color: T.text3, textAlign: "center", marginTop: 24 },
 });

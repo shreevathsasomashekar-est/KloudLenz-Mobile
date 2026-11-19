@@ -1,79 +1,50 @@
 import axios from "axios";
 
-// Configuration for API
+// ── Backend URL: change ONLY this line (must end with /api/v1) ──
+// USB-connected phone: "http://localhost:8081/api/v1" with `adb reverse tcp:8081 tcp:8081`
+// Real device over the internet: the ngrok https URL, e.g. "https://<id>.ngrok-free.app/api/v1"
+// Android emulator: "http://10.0.2.2:8081/api/v1"
+export const BASE_URL = "http://localhost:8081/api/v1";
+
 export const API_CONFIG = {
-  // Backend URL
-  BASE_URL: "http://10.0.2.2:8080/api/v1",
-  // BASE_URL: "https://calculably-noncretaceous-georgene.ngrok-free.dev/api/v1", // ngrok backend
-  TIMEOUT: 10000, // 10 seconds
-  USE_MOCK: false, // Using real backend
+  BASE_URL,
+  // Approving runs the change in Zuora; the first call after a backend restart also
+  // fetches a Zuora OAuth token, which can take well over 10 s.
+  TIMEOUT: 30000,
+  USE_MOCK: false,
 };
 
-// Create axios instance with default configuration
 export const apiClient = axios.create({
   baseURL: API_CONFIG.BASE_URL,
   timeout: API_CONFIG.TIMEOUT,
   headers: {
     "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
   },
 });
 
-// Request interceptor - Add auth token to requests
-apiClient.interceptors.request.use(
-  (config) => {
-    // TODO: Add authentication token when available
-    // const token = await SecureStore.getItemAsync('authToken');
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`;
-    // }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  },
-);
-
-// Response interceptor - Handle common errors
+// Every rejection is a plain, user-readable string. Failures are logged with console.log,
+// not console.error: in dev builds console.error raises a red LogBox toast that covers the
+// bottom action bar and looks like a crash.
 apiClient.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
-    // Handle common errors
+    const url = error.config?.url;
     if (error.response) {
-      // Server responded with error status
       const { status, data } = error.response;
-
-      console.error("❌ API Error Response:");
-      console.error("   Status:", status);
-      console.error("   Data:", JSON.stringify(data, null, 2));
-      console.error("   URL:", error.config?.url);
-
-      if (status === 401) {
-        // Unauthorized - redirect to login
-        console.log("Unauthorized access - redirecting to login");
-        // TODO: Clear stored token and redirect to login
-      } else if (status === 403) {
-        // Forbidden
-        console.log("Access forbidden");
-      } else if (status === 500) {
-        // Server error
-        console.log("Server error occurred");
-      }
-
+      console.log(`API ${status} on ${url}:`, JSON.stringify(data));
       return Promise.reject(
-        data?.message || data?.error || `Server error: ${status}`,
+        data?.data?.reasons?.[0]?.message || data?.message || data?.error || `Server error (${status})`,
       );
-    } else if (error.request) {
-      // Request made but no response
-      console.error("❌ Network Error:");
-      console.error("   Request:", error.request);
-      console.error("   Message:", error.message);
-      return Promise.reject("Network error. Please check your connection.");
-    } else {
-      // Something else happened
-      console.error("❌ Error:", error.message);
-      return Promise.reject(error.message || "An error occurred");
     }
+    if (error.code === "ECONNABORTED") {
+      console.log(`API timeout on ${url}`);
+      return Promise.reject("The server took too long to respond. Pull to refresh to check the latest status.");
+    }
+    if (error.request) {
+      console.log(`API unreachable on ${url}:`, error.message);
+      return Promise.reject("Can't reach the KloudLenz server. Check your connection and try again.");
+    }
+    return Promise.reject(error.message || "Something went wrong");
   },
 );

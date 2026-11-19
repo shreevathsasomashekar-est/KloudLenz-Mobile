@@ -1,30 +1,18 @@
 import { Stack } from "expo-router";
 import React from "react";
+import { T } from "../../constants/theme";
 
 export default function DashboardLayout() {
   return (
     <Stack
       screenOptions={{
-        headerShown: true,
-        headerTintColor: "#c41230",
-        headerTitleStyle: {
-          fontWeight: "600",
-          color: "#c41230",
-        },
+        headerShown: false,
+        animation: "slide_from_right",
+        contentStyle: { backgroundColor: T.pageBg },
       }}
     >
-      <Stack.Screen
-        name="index"
-        options={{
-          title: "Approvals",
-        }}
-      />
-      <Stack.Screen
-        name="[id]"
-        options={{
-          title: "Approval Details",
-        }}
-      />
+      <Stack.Screen name="index" />
+      <Stack.Screen name="[id]" />
     </Stack>
   );
 }

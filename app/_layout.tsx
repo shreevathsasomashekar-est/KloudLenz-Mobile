@@ -1,17 +1,40 @@
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  useFonts,
+} from "@expo-google-fonts/inter";
 import * as Notifications from "expo-notifications";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef } from "react";
 import { Alert, Platform } from "react-native";
+import { F, T } from "../constants/theme";
 import { storeFCMToken } from "../services/fcmTokenManager";
 import {
   generateFCMToken,
   setupNotificationHandler,
 } from "../services/fcmTokenService";
 
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 export default function RootLayout() {
   const notificationListener = useRef<any>(null);
   const responseListener = useRef<any>(null);
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded, fontError]);
 
   // Generate FCM token on app startup and store temporarily
   useEffect(() => {
@@ -67,10 +90,13 @@ export default function RootLayout() {
           // Handle notification tap - you can navigate to specific screens here
           console.log("Notification data:", data);
 
-          // Example: Navigate to approval detail if notification contains approvalId
-          // if (data?.approvalId) {
-          //   router.push(`/(dashboard)/${data.approvalId}`);
-          // }
+          const approvalId = data?.approvalId ?? data?.id;
+          if (approvalId) {
+            router.push({
+              pathname: "/(dashboard)/[id]",
+              params: { id: String(approvalId) },
+            });
+          }
         });
 
       console.log("✅ Notification listeners registered");
@@ -91,17 +117,22 @@ export default function RootLayout() {
     };
   }, []); // Empty dependency array - runs only once on mount
 
+  if (!fontsLoaded && !fontError) {
+    return null;
+  }
+
   return (
     <>
       <StatusBar />
       <Stack
         screenOptions={{
           headerShown: true,
-          headerTintColor: "#c41230",
+          headerTintColor: T.brand,
           headerTitleStyle: {
-            fontWeight: "600",
-            color: "#c41230",
+            fontFamily: F.semibold,
+            color: T.brand,
           },
+          contentStyle: { backgroundColor: T.pageBg },
         }}
       >
         <Stack.Screen

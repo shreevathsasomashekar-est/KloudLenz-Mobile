@@ -1,53 +1,41 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
-export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
-  },
+export const T = {
+  brand: "#c8102e",
+  brandHover: "#a90d26",
+  brandTint: "#fdf5f6",
+  brandBorder: "#e8c0c5",
+  pageBg: "#eef1f5",
+  surface: "#ffffff",
+  cardBorder: "#e2e6ec",
+  borderSubtle: "#f0f0f0",
+  border: "#e5e5e5",
+  text: "#1a1a1a",
+  text2: "#555555",
+  text3: "#aaaaaa",
+  green: "#1e7d44",
+  greenBg: "#edf8f1",
+  amber: "#92650a",
+  amberBg: "#fff8e6",
+  orange: "#d97706",
+  orangeBg: "#fff4e6",
+  red: "#b91c1c",
+  redBg: "#fff0f0",
+  blue: "#2952b3",
+  blueBg: "#eff4ff",
+  purple: "#6d28d9",
+  purpleBg: "#f5f0ff",
+  grey: "#888888",
+  greyBg: "#f5f5f5",
+  white: "#ffffff",
+  overlay: "rgba(16, 24, 40, 0.45)",
+  radius: 10,
+  radiusSm: 7,
+  pillRadius: 20,
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+// Android ignores fontWeight for custom fonts, so each weight is its own family.
+export const F = {
+  regular: "Inter_400Regular",
+  medium: "Inter_500Medium",
+  semibold: "Inter_600SemiBold",
+  bold: "Inter_700Bold",
+};

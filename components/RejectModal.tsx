@@ -1,155 +1,123 @@
-import React, { useState } from "react";
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { F, T } from "../constants/theme";
+import { Sheet } from "./Sheet";
 
 interface RejectModalProps {
   visible: boolean;
   onCancel: () => void;
   onSubmit: (reason: string) => void;
   isLoading?: boolean;
+  summary?: string;
 }
 
-export const RejectModal: React.FC<RejectModalProps> = ({
-  visible,
-  onCancel,
-  onSubmit,
-  isLoading = false,
-}) => {
+const PRESETS = [
+  "Needs manager sign-off",
+  "Incorrect amount",
+  "Duplicate request",
+  "Customer to contact sales",
+];
+
+export const RejectModal: React.FC<RejectModalProps> = ({ visible, onCancel, onSubmit, isLoading = false, summary }) => {
   const [reason, setReason] = useState("");
 
-  const handleSubmit = () => {
-    if (reason.trim()) {
-      onSubmit(reason);
-      setReason("");
-    }
-  };
+  useEffect(() => {
+    if (!visible) setReason("");
+  }, [visible]);
 
-  const handleCancel = () => {
-    setReason("");
-    onCancel();
-  };
+  const canSubmit = reason.trim().length > 0 && !isLoading;
 
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={handleCancel}
-    >
-      <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
-          <Text style={styles.title}>Rejection Reason</Text>
+    <Sheet visible={visible} onClose={onCancel} dismissable={!isLoading}>
+      <Text style={styles.title}>Reject request</Text>
+      {!!summary && <Text style={styles.subtitle}>{summary}</Text>}
 
-          <TextInput
-            style={styles.input}
-            placeholder="Please provide a reason for rejection..."
-            placeholderTextColor="#ccc"
-            multiline={true}
-            numberOfLines={4}
-            value={reason}
-            onChangeText={setReason}
-            editable={!isLoading}
-          />
-
-          <View style={styles.buttonContainer}>
+      <Text style={styles.label}>Quick reasons</Text>
+      <View style={styles.presets}>
+        {PRESETS.map((p) => {
+          const active = reason === p;
+          return (
             <Pressable
-              style={[styles.button, styles.cancelButton]}
-              onPress={handleCancel}
+              key={p}
+              onPress={() => setReason(p)}
               disabled={isLoading}
+              style={[styles.preset, active && styles.presetActive]}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={[styles.presetText, active && styles.presetTextActive]}>{p}</Text>
             </Pressable>
-            <Pressable
-              style={[
-                styles.button,
-                styles.submitButton,
-                (!reason.trim() || isLoading) && styles.submitButtonDisabled,
-              ]}
-              onPress={handleSubmit}
-              disabled={!reason.trim() || isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color="#4CAF50" />
-              ) : (
-                <Text style={styles.submitButtonText}>Submit</Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
+          );
+        })}
       </View>
-    </Modal>
+
+      <Text style={styles.label}>Reason shared with the requester</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Explain why this request is being rejected"
+        placeholderTextColor={T.text3}
+        multiline
+        value={reason}
+        onChangeText={setReason}
+        editable={!isLoading}
+        maxLength={500}
+      />
+
+      <View style={styles.actions}>
+        <Pressable style={[styles.btn, styles.btnGhost]} onPress={onCancel} disabled={isLoading}>
+          <Text style={styles.btnGhostText}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnDanger, !canSubmit && styles.btnDisabled]}
+          onPress={() => canSubmit && onSubmit(reason.trim())}
+          disabled={!canSubmit}
+        >
+          {isLoading ? <ActivityIndicator color={T.white} /> : <Text style={styles.btnDangerText}>Reject request</Text>}
+        </Pressable>
+      </View>
+    </Sheet>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
+  title: { fontFamily: F.bold, fontSize: 18, color: T.text },
+  subtitle: { fontFamily: F.regular, fontSize: 13, color: T.text2, marginTop: 4 },
+  label: {
+    fontFamily: F.semibold,
+    fontSize: 10.5,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: T.text3,
+    marginTop: 18,
+    marginBottom: 8,
   },
-  modalContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 20,
-    width: "85%",
-    maxWidth: 400,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#333",
-    marginBottom: 16,
-  },
-  input: {
+  presets: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  preset: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: T.pillRadius,
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
+    borderColor: T.border,
+    backgroundColor: T.surface,
+  },
+  presetActive: { borderColor: T.brand, backgroundColor: T.brandTint },
+  presetText: { fontFamily: F.medium, fontSize: 12.5, color: T.text2 },
+  presetTextActive: { color: T.brand },
+  input: {
+    minHeight: 96,
+    borderWidth: 1,
+    borderColor: T.border,
+    borderRadius: T.radius,
     padding: 12,
+    fontFamily: F.regular,
     fontSize: 14,
-    color: "#333",
-    marginBottom: 16,
+    color: T.text,
     textAlignVertical: "top",
+    backgroundColor: T.surface,
   },
-  buttonContainer: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cancelButton: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#F44336",
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#F44336",
-  },
-  submitButton: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#4CAF50",
-  },
-  submitButtonDisabled: {
-    borderColor: "#ccc",
-  },
-  submitButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#4CAF50",
-  },
+  actions: { flexDirection: "row", gap: 10, marginTop: 18 },
+  btn: { flex: 1, height: 48, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  btnGhost: { backgroundColor: T.greyBg },
+  btnGhostText: { fontFamily: F.semibold, fontSize: 15, color: T.text2 },
+  btnDanger: { backgroundColor: T.brand },
+  btnDangerText: { fontFamily: F.semibold, fontSize: 15, color: T.white },
+  btnDisabled: { opacity: 0.45 },
 });

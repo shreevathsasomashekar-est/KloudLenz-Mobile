@@ -1,407 +1,476 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { RejectModal } from "../../components/RejectModal";
+import { Sheet } from "../../components/Sheet";
+import { StatusPill } from "../../components/StatusPill";
+import { TypeIcon } from "../../components/TypeIcon";
+import { fmtDateTime, STATUS_META, typeMeta } from "../../constants/requestMeta";
+import { F, T } from "../../constants/theme";
 import { eventBus } from "../../services/eventBus";
 import { mockApi } from "../../services/mockApi";
 import { Approval } from "../../types/approval";
 
-export default function ApprovalDetailsScreen() {
+type Notice = { kind: "success" | "error"; text: string } | null;
+
+const errText = (e: unknown, fallback: string) =>
+  typeof e === "string" ? e : e instanceof Error ? e.message : fallback;
+
+export default function ApprovalDetailScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [approval, setApproval] = useState<Approval | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [rejectModalVisible, setRejectModalVisible] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [showTech, setShowTech] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
 
-  useEffect(() => {
-    loadApprovalDetails();
+  const load = useCallback(async () => {
+    if (!id) return;
+    try {
+      setLoadError(null);
+      const a = await mockApi.getApprovalById(id);
+      setApproval(a);
+      eventBus.emit("approvalUpdated", { id: a.id, status: a.status, reason: a.reason });
+      return a;
+    } catch (e) {
+      setLoadError(errText(e, "Couldn't load this request."));
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
-  const loadApprovalDetails = async () => {
-    try {
-      setIsLoading(true);
-      if (!id) throw new Error("No approval ID provided");
-      const data = await mockApi.getApprovalById(id);
-      setApproval(data);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load approval";
-      Alert.alert("Error", message);
-      router.back();
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const handleApprove = async () => {
+  const approve = async () => {
     if (!approval) return;
-    setIsProcessing(true);
+    setProcessing(true);
     try {
       await mockApi.approveRequest(approval.id);
-
-      // Update local state and list after success
-      setApproval((p) => (p ? { ...p, status: "approved" } : p));
-      eventBus.emit("approvalUpdated", { id: approval.id, status: "approved" });
-
-      Alert.alert("Success", "Approval has been approved", [
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to approve";
-      Alert.alert("Error", message);
+      setConfirmOpen(false);
+      await load();
+      setNotice({ kind: "success", text: "Approved and applied in Zuora." });
+    } catch (e) {
+      setConfirmOpen(false);
+      const fresh = await load();
+      if (!fresh?.reason) setNotice({ kind: "error", text: errText(e, "Zuora could not apply this change.") });
     } finally {
-      setIsProcessing(false);
+      setProcessing(false);
     }
   };
 
-  const handleRejectSubmit = async (reason: string) => {
+  const reject = async (reason: string) => {
     if (!approval) return;
-    setIsProcessing(true);
+    setProcessing(true);
     try {
       await mockApi.rejectRequest(approval.id, reason);
-
-      // Update local state after success
-      setApproval((p) =>
-        p ? { ...p, status: "rejected", rejectionReason: reason } : p,
-      );
-      eventBus.emit("approvalUpdated", {
-        id: approval.id,
-        status: "rejected",
-        rejectionReason: reason,
-      });
-
-      setRejectModalVisible(false);
-      Alert.alert("Success", "Approval has been rejected", [
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to reject";
-      Alert.alert("Error", message);
+      setRejectOpen(false);
+      await load();
+      setNotice({ kind: "success", text: "Request rejected. Nothing was changed in Zuora." });
+    } catch (e) {
+      setNotice({ kind: "error", text: errText(e, "Couldn't reject this request.") });
+      setRejectOpen(false);
     } finally {
-      setIsProcessing(false);
+      setProcessing(false);
     }
   };
 
-  if (isLoading) {
+  const topBar = (
+    <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
+      <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={8} accessibilityLabel="Back">
+        <MaterialCommunityIcons name="arrow-left" size={22} color={T.text} />
+      </Pressable>
+      <Text style={styles.topTitle}>{approval ? `Request #${approval.id}` : "Request"}</Text>
+      <View style={{ width: 40 }} />
+    </View>
+  );
+
+  if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#1976d2" />
+      <View style={styles.root}>
+        <StatusBar barStyle="dark-content" backgroundColor={T.surface} />
+        {topBar}
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={T.brand} />
+        </View>
       </View>
     );
   }
 
   if (!approval) {
     return (
-      <View style={styles.centerContainer}>
-        <Text>Approval not found</Text>
+      <View style={styles.root}>
+        <StatusBar barStyle="dark-content" backgroundColor={T.surface} />
+        {topBar}
+        <View style={styles.center}>
+          <MaterialCommunityIcons name="cloud-alert" size={40} color={T.text3} />
+          <Text style={styles.stateTitle}>Couldn't open this request</Text>
+          <Text style={styles.stateText}>{loadError || "It may have been removed."}</Text>
+          <Pressable
+            style={styles.stateBtn}
+            onPress={() => {
+              setLoading(true);
+              load();
+            }}
+          >
+            <Text style={styles.stateBtnText}>Try again</Text>
+          </Pressable>
+        </View>
       </View>
     );
   }
 
+  const meta = typeMeta(approval.category);
+  const status = STATUS_META[approval.status];
+  const pending = approval.status === "pending";
+  const isRefund = approval.category === "Refund";
+  const details: [string, string][] = [
+    ["Account", approval.accountNumber || approval.username],
+    [isRefund ? "Payment" : "Subscription", approval.reference || approval.subscriptionNumber || ""],
+    ...Object.entries(approval.extraFields || {})
+      .filter(([k]) => !["Payment #", "Subscription #"].includes(k))
+      .map(([k, v]) => [k.replace(/#$/, "number").trim(), String(v)] as [string, string]),
+    ["Request ID", `#${approval.id}`],
+  ].filter(([, v]) => !!v && v !== "N/A") as [string, string][];
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="dark-content" />
-      <ScrollView style={styles.scrollView}>
-        <View style={{ marginBottom: 12 }}>
-          <Text style={styles.mainTitle}>
-            The user wants to make changes in{" "}
-            {approval.category ?? "Service suspension"}
-          </Text>
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor={T.surface} />
+      {topBar}
+
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: pending ? 120 : insets.bottom + 24 }}>
+        {notice && (
+          <View style={[styles.notice, notice.kind === "success" ? styles.noticeOk : styles.noticeErr]}>
+            <MaterialCommunityIcons
+              name={notice.kind === "success" ? "check-circle" : "alert-circle"}
+              size={18}
+              color={notice.kind === "success" ? T.green : T.red}
+            />
+            <Text style={[styles.noticeText, { color: notice.kind === "success" ? T.green : T.red }]}>{notice.text}</Text>
+            <Pressable onPress={() => setNotice(null)} hitSlop={8}>
+              <MaterialCommunityIcons name="close" size={16} color={T.text3} />
+            </Pressable>
+          </View>
+        )}
+
+        <View style={styles.hero}>
+          <View style={styles.heroTop}>
+            <TypeIcon type={approval.category} size={48} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroType}>{meta.label}</Text>
+              <StatusPill status={approval.status} large />
+            </View>
+          </View>
+          <Text style={styles.heroSummary}>{approval.summary || approval.description}</Text>
+          <View style={styles.heroMeta}>
+            <MaterialCommunityIcons name="domain" size={14} color={T.text2} />
+            <Text style={styles.heroMetaText}>{approval.accountNumber || approval.username}</Text>
+            <Text style={styles.dot}>•</Text>
+            <MaterialCommunityIcons name="clock-outline" size={14} color={T.text2} />
+            <Text style={styles.heroMetaText}>{fmtDateTime(approval.timestamp)}</Text>
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>User Information</Text>
-          <View style={styles.infoContainer}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Account#:</Text>
-              <Text style={styles.infoValue}>{approval.username}</Text>
+        {(approval.status === "failed" || approval.status === "rejected") && !!approval.reason && (
+          <View style={[styles.reasonBox, { backgroundColor: status.bg === T.greyBg ? T.redBg : status.bg }]}>
+            <Text style={styles.reasonLabel}>
+              {approval.status === "failed" ? "Zuora rejected this change" : "Rejection reason"}
+            </Text>
+            <Text style={styles.reasonText}>{approval.reason}</Text>
+          </View>
+        )}
+
+        <Text style={styles.sectionLabel}>Details</Text>
+        <View style={styles.panel}>
+          {details.map(([k, v], i) => (
+            <View key={k} style={[styles.row, i === details.length - 1 && { borderBottomWidth: 0 }]}>
+              <Text style={styles.rowKey}>{k}</Text>
+              <Text style={styles.rowVal} selectable>{v}</Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>User ID:</Text>
-              <Text style={styles.infoValue}>{approval.userId}</Text>
+          ))}
+        </View>
+
+        <Text style={styles.sectionLabel}>Activity</Text>
+        <View style={styles.panel}>
+          <View style={styles.tlItem}>
+            <View style={styles.tlRail}>
+              <View style={[styles.tlDot, { backgroundColor: T.blue }]} />
+              <View style={styles.tlLine} />
+            </View>
+            <View style={styles.tlBody}>
+              <Text style={styles.tlTitle}>Requested by customer</Text>
+              <Text style={styles.tlSub}>{fmtDateTime(approval.timestamp)} · via KloudLenz portal</Text>
+            </View>
+          </View>
+          <View style={styles.tlItem}>
+            <View style={styles.tlRail}>
+              <View style={[styles.tlDot, { backgroundColor: pending ? T.orange : status.fg }]} />
+            </View>
+            <View style={styles.tlBody}>
+              <Text style={styles.tlTitle}>
+                {pending
+                  ? "Awaiting your decision"
+                  : approval.status === "approved"
+                    ? "Approved and applied in Zuora"
+                    : approval.status === "rejected"
+                      ? "Rejected"
+                      : "Approved, but Zuora refused the change"}
+              </Text>
+              {!pending && !!approval.decidedOn && <Text style={styles.tlSub}>{fmtDateTime(approval.decidedOn)}</Text>}
             </View>
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Request Information</Text>
-          <View style={styles.infoContainer}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Category:</Text>
-              <Text style={styles.infoValue}>
-                {approval.category ?? "Service suspension"}
+        {!!approval.rawJson && (
+          <View style={[styles.panel, { marginTop: 14 }]}>
+            <Pressable style={styles.techHead} onPress={() => setShowTech((s) => !s)}>
+              <MaterialCommunityIcons name="code-braces" size={16} color={T.text2} />
+              <Text style={styles.techTitle}>Technical details</Text>
+              <MaterialCommunityIcons name={showTech ? "chevron-up" : "chevron-down"} size={20} color={T.text3} />
+            </Pressable>
+            {showTech && (
+              <Text style={styles.techBody} selectable>
+                {approval.rawJson}
               </Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Description:</Text>
-              <Text style={styles.infoValue}>{approval.description}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Requested on:</Text>
-              <Text style={styles.infoValue}>
-                {new Date(approval.timestamp).toLocaleString()}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Fields</Text>
-          <View style={styles.infoContainer}>
-            {approval.category === "Suspend" && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Suspension policy:</Text>
-                <Text style={styles.infoValue}>{approval.suspensionPolicy}</Text>
-              </View>
             )}
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Execution date:</Text>
-              <Text style={styles.infoValue}>
-                {new Date(approval.executionDate).toLocaleDateString()}
-              </Text>
-            </View>
-            {approval.extraFields &&
-              (() => {
-                const skipKeys = new Set([
-                  "suspension policy",
-                  "execution date",
-                  "executiondate",
-                  "suspensionpolicy",
-                ]);
-                return Object.entries(approval.extraFields)
-                  .filter(([key, value]) => {
-                    const k = key.trim().toLowerCase();
-                    if (skipKeys.has(k)) return false;
-                    // also avoid duplicates if value matches known fields
-                    if (value === approval.suspensionPolicy) return false;
-                    if (value === approval.executionDate) return false;
-                    return true;
-                  })
-                  .map(([key, value]) => (
-                    <View key={key} style={styles.infoRow}>
-                      <Text style={styles.infoLabel}>{key}:</Text>
-                      <Text style={styles.infoValue}>
-                        {typeof value === "object"
-                          ? JSON.stringify(value, null, 2)
-                          : String(value)}
-                      </Text>
-                    </View>
-                  ));
-              })()}
           </View>
-        </View>
+        )}
       </ScrollView>
 
-      {(() => { console.log("Current Approval Status:", approval.status); return null; })()}
-      {approval.status.toLowerCase() === "pending" ? (
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={[styles.button, styles.rejectButton]}
-            onPress={() => setRejectModalVisible(true)}
-            disabled={isProcessing}
+      {pending && (
+        <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}>
+          <Pressable
+            style={({ pressed }) => [styles.btn, styles.btnReject, pressed && { backgroundColor: T.brandTint }]}
+            onPress={() => setRejectOpen(true)}
+            disabled={processing}
           >
-            <Text style={styles.rejectButtonText}>Reject</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.button,
-              styles.approveButton,
-              isProcessing && styles.buttonDisabled,
-            ]}
-            onPress={handleApprove}
-            disabled={isProcessing}
+            <MaterialCommunityIcons name="close" size={18} color={T.brand} />
+            <Text style={styles.btnRejectText}>Reject</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.btn, styles.btnApprove, pressed && { backgroundColor: T.brandHover }]}
+            onPress={() => setConfirmOpen(true)}
+            disabled={processing}
           >
-            {isProcessing ? (
-              <ActivityIndicator color="#4CAF50" />
-            ) : (
-              <Text style={styles.approveButtonText}>Approve</Text>
-            )}
-          </TouchableOpacity>
+            <MaterialCommunityIcons name="check" size={18} color={T.white} />
+            <Text style={styles.btnApproveText}>Approve</Text>
+          </Pressable>
         </View>
-      ) : (
-        <View
-          style={[
-            styles.statusBanner,
-            approval.status.toLowerCase() === "approved"
-              ? styles.statusBannerApproved
-              : styles.statusBannerRejected,
-          ]}
-        >
-          <Text
-            style={[
-              styles.statusBannerText,
-              approval.status.toLowerCase() === "approved"
-                ? styles.statusTextApproved
-                : styles.statusTextRejected,
-            ]}
-          >
-            This request has been {approval.status.toUpperCase()}
+      )}
+
+      <Sheet visible={confirmOpen} onClose={() => setConfirmOpen(false)} dismissable={!processing}>
+        <View style={styles.confirmIcon}>
+          <TypeIcon type={approval.category} size={52} />
+        </View>
+        <Text style={styles.confirmTitle}>Approve this request?</Text>
+        <Text style={styles.confirmSummary}>{approval.summary}</Text>
+        <View style={styles.confirmNote}>
+          <MaterialCommunityIcons name="lightning-bolt-outline" size={16} color={T.amber} />
+          <Text style={styles.confirmNoteText}>
+            The change is applied in Zuora for {approval.accountNumber || "this account"} immediately and can't be undone from the app.
           </Text>
         </View>
-      )
-      }
+        <View style={styles.confirmActions}>
+          <Pressable style={[styles.btn, styles.btnGhost]} onPress={() => setConfirmOpen(false)} disabled={processing}>
+            <Text style={styles.btnGhostText}>Cancel</Text>
+          </Pressable>
+          <Pressable style={[styles.btn, styles.btnApprove, processing && { opacity: 0.8 }]} onPress={approve} disabled={processing}>
+            {processing ? (
+              <>
+                <ActivityIndicator color={T.white} size="small" />
+                <Text style={styles.btnApproveText}>Applying…</Text>
+              </>
+            ) : (
+              <Text style={styles.btnApproveText}>Approve</Text>
+            )}
+          </Pressable>
+        </View>
+      </Sheet>
 
       <RejectModal
-        visible={rejectModalVisible}
-        onCancel={() => setRejectModalVisible(false)}
-        onSubmit={handleRejectSubmit}
-        isLoading={isProcessing}
+        visible={rejectOpen}
+        onCancel={() => setRejectOpen(false)}
+        onSubmit={reject}
+        isLoading={processing}
+        summary={approval.summary}
       />
-    </View >
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f9f9f9",
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: "center",
+  root: { flex: 1, backgroundColor: T.pageBg },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  topBar: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: T.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: T.borderSubtle,
   },
-  scrollView: {
-    flex: 1,
-    padding: 16,
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: T.greyBg,
   },
-  section: {
-    marginBottom: 20,
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#333",
+  topTitle: { fontFamily: F.semibold, fontSize: 16, color: T.text },
+  stateTitle: { fontFamily: F.bold, fontSize: 16, color: T.text, marginTop: 12 },
+  stateText: { fontFamily: F.regular, fontSize: 13, color: T.text2, textAlign: "center", marginTop: 6 },
+  stateBtn: { marginTop: 16, backgroundColor: T.brand, borderRadius: 10, paddingHorizontal: 18, paddingVertical: 10 },
+  stateBtnText: { fontFamily: F.semibold, fontSize: 14, color: T.white },
+  notice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
     marginBottom: 12,
   },
-  mainTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#1a1a1a",
+  noticeOk: { backgroundColor: T.greenBg },
+  noticeErr: { backgroundColor: T.redBg },
+  noticeText: { flex: 1, fontFamily: F.semibold, fontSize: 13 },
+  hero: {
+    backgroundColor: T.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: T.cardBorder,
+    padding: 18,
+  },
+  heroTop: { flexDirection: "row", alignItems: "center", gap: 12 },
+  heroType: {
+    fontFamily: F.semibold,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: T.text3,
     marginBottom: 6,
   },
-  infoContainer: {
-    gap: 12,
+  heroSummary: { fontFamily: F.bold, fontSize: 21, lineHeight: 28, color: T.text, marginTop: 16 },
+  heroMeta: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 5, marginTop: 12 },
+  heroMetaText: { fontFamily: F.medium, fontSize: 12.5, color: T.text2 },
+  dot: { color: T.text3, marginHorizontal: 3 },
+  reasonBox: { borderRadius: 12, padding: 14, marginTop: 12 },
+  reasonLabel: {
+    fontFamily: F.semibold,
+    fontSize: 10.5,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: T.red,
   },
-  infoRow: {
+  reasonText: { fontFamily: F.medium, fontSize: 14, lineHeight: 20, color: T.text, marginTop: 4 },
+  sectionLabel: {
+    fontFamily: F.semibold,
+    fontSize: 10.5,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    color: T.text3,
+    marginTop: 20,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  panel: {
+    backgroundColor: T.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: T.cardBorder,
+    overflow: "hidden",
+  },
+  row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    paddingBottom: 10,
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: T.borderSubtle,
   },
-  infoLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#666",
-    flex: 1,
+  rowKey: { fontFamily: F.regular, fontSize: 13.5, color: T.text2 },
+  rowVal: { flexShrink: 1, fontFamily: F.semibold, fontSize: 13.5, color: T.text, textAlign: "right" },
+  tlItem: { flexDirection: "row", paddingHorizontal: 16 },
+  tlRail: { width: 18, alignItems: "center", paddingTop: 18 },
+  tlDot: { width: 10, height: 10, borderRadius: 5 },
+  tlLine: { flex: 1, width: 2, backgroundColor: T.border, marginTop: 4 },
+  tlBody: { flex: 1, paddingVertical: 13, paddingLeft: 8 },
+  tlTitle: { fontFamily: F.semibold, fontSize: 13.5, color: T.text },
+  tlSub: { fontFamily: F.regular, fontSize: 12, color: T.text2, marginTop: 2 },
+  techHead: { flexDirection: "row", alignItems: "center", gap: 8, padding: 14 },
+  techTitle: { flex: 1, fontFamily: F.semibold, fontSize: 13.5, color: T.text2 },
+  techBody: {
+    fontFamily: "monospace",
+    fontSize: 11,
+    lineHeight: 16,
+    color: T.text2,
+    backgroundColor: "#f7f8fa",
+    padding: 14,
+    borderTopWidth: 1,
+    borderTopColor: T.borderSubtle,
   },
-  infoValue: {
-    fontSize: 13,
-    color: "#333",
-    flex: 1.5,
-    textAlign: "right",
-  },
-  amountValue: {
-    fontWeight: "700",
-    color: "#1976d2",
-  },
-  attachmentList: {
-    gap: 8,
-  },
-  attachmentItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: "#f5f5f5",
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  attachmentText: {
-    fontSize: 13,
-    color: "#333",
-  },
-  buttonContainer: {
+  actionBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: "row",
-    padding: 16,
-    gap: 12,
-    backgroundColor: "#fff",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: T.surface,
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: T.borderSubtle,
+    shadowColor: "#101828",
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 8,
   },
-  button: {
+  btn: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
+    height: 50,
+    borderRadius: 12,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 6,
   },
-  approveButton: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#4CAF50",
+  btnReject: { backgroundColor: T.surface, borderWidth: 1, borderColor: T.brandBorder },
+  btnRejectText: { fontFamily: F.semibold, fontSize: 15, color: T.brand },
+  btnApprove: { backgroundColor: T.brand },
+  btnApproveText: { fontFamily: F.semibold, fontSize: 15, color: T.white },
+  btnGhost: { backgroundColor: T.greyBg },
+  btnGhostText: { fontFamily: F.semibold, fontSize: 15, color: T.text2 },
+  confirmIcon: { alignItems: "center", marginTop: 4 },
+  confirmTitle: { fontFamily: F.bold, fontSize: 19, color: T.text, textAlign: "center", marginTop: 12 },
+  confirmSummary: { fontFamily: F.medium, fontSize: 14.5, color: T.text2, textAlign: "center", marginTop: 6 },
+  confirmNote: {
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: T.amberBg,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 16,
   },
-  approveButtonText: {
-    color: "#4CAF50",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  rejectButton: {
-    backgroundColor: "#fff",
-    borderWidth: 2,
-    borderColor: "#F44336",
-  },
-  rejectButtonText: {
-    color: "#F44336",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  buttonDisabled: {
-    backgroundColor: "#ccc",
-  },
-  statusBanner: {
-    padding: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
-  },
-  statusBannerApproved: {
-    backgroundColor: "#E8F5E9", // Light Green
-  },
-  statusBannerRejected: {
-    backgroundColor: "#FFEBEE", // Light Red
-  },
-  statusBannerText: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  statusTextApproved: {
-    color: "#2E7D32", // Dark Green
-  },
-  statusTextRejected: {
-    color: "#C62828", // Dark Red
-  },
+  confirmNoteText: { flex: 1, fontFamily: F.regular, fontSize: 12.5, lineHeight: 18, color: T.amber },
+  confirmActions: { flexDirection: "row", gap: 10, marginTop: 18 },
 });

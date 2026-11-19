@@ -1,4 +1,4 @@
-import { Approval } from "../types/approval";
+import { Approval, ApprovalStatus } from "../types/approval";
 import { User } from "../types/user";
 import { API_CONFIG, apiClient } from "./apiConfig";
 import { getDeviceType } from "./fcmTokenManager";
@@ -10,10 +10,76 @@ import { getDeviceType } from "./fcmTokenManager";
  * API Endpoints:
  * - POST /admin/login - User authentication
  * - GET /approval/allDetails - Get all approvals
- * - GET /approvals/:id - Get approval by ID
- * - POST /approvals/:id/approve - Approve a request
- * - POST /approvals/:id/reject - Reject a request
+ * - GET /approval/getDetails/:id - Get approval by ID
+ * - POST /approval/modifyStatus - Approve / reject a request
  */
+
+const mapStatus = (s: any): ApprovalStatus => {
+  const v = String(s || "").toLowerCase();
+  if (v === "approved" || v === "success") return "approved";
+  if (v === "rejected") return "rejected";
+  if (v === "failed") return "failed";
+  return "pending";
+};
+
+// modifyStatus answers HTTP 200 even when Zuora refuses the change; the outcome is in the body.
+const assertDecision = (body: any, fallback: string) => {
+  if (body?.success === false || body?.data?.success === false) {
+    throw body?.data?.reasons?.[0]?.message || body?.message || fallback;
+  }
+  return body;
+};
+
+const parseRaw = (raw: any): any => {
+  if (raw && typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return raw || {};
+};
+
+// Backend dates carry microseconds ("2026-11-17T23:22:25.543202"); trim to ms so Hermes parses them
+export const normDate = (s: any): string =>
+  typeof s === "string" ? s.replace(/(\.\d{3})\d+/, "$1") : "";
+
+const buildSummary = (type: string, raw: any, item: any): string => {
+  const sub = raw.subscriptions?.[0]?.referenceNumber || item.referenceNumber || "";
+  const actions: any[] = raw.subscriptions?.[0]?.orderActions || [];
+  const act = (t: string) => actions.find((a) => a?.type === t);
+  switch (type) {
+    case "Refund": {
+      const amt = parseFloat(raw.totalAmount);
+      const pay = raw.paymentKey || item.referenceNumber || "";
+      return `Refund${isNaN(amt) ? "" : ` $${amt.toFixed(2)}`}${pay ? ` on payment ${pay}` : ""}`;
+    }
+    case "ChangeProduct":
+      return `Change plan: ${raw.productNames?.old || "?"} → ${raw.productNames?.new || "?"}`;
+    case "AddProduct":
+      return `Add product${raw.productNames?.new ? ` ${raw.productNames.new}` : ""}${sub ? ` to ${sub}` : ""}`;
+    case "Suspend": {
+      const s = act("Suspend")?.suspend;
+      const when = s?.suspendSpecificDate || s?.suspendPolicy;
+      return `Suspend ${sub}${when ? ` from ${when}` : ""}`;
+    }
+    case "CancelSubscription": {
+      const c = act("CancelSubscription")?.cancelSubscription;
+      const when = c?.cancellationEffectiveDate || c?.cancellationPolicy;
+      return `Cancel ${sub}${when ? ` effective ${when}` : ""}`;
+    }
+    case "TermsAndConditions": {
+      const tc = act("TermsAndConditions")?.termsAndConditions;
+      const term = tc?.lastTerm ? `${tc.lastTerm.period} ${tc.lastTerm.periodType}` : "";
+      const auto = tc ? `auto-renew ${tc.autoRenew ? "on" : "off"}` : "";
+      const tail = [term, auto].filter(Boolean).join(", ");
+      return `Update terms on ${sub}${tail ? `: ${tail}` : ""}`;
+    }
+    default:
+      return `${type || "Request"}${sub ? ` on ${sub}` : ""}`;
+  }
+};
 
 export const backendApi = {
   /**
@@ -42,10 +108,11 @@ export const backendApi = {
     const userData = response.data.data;
 
     // Transform backend response to User type
+    const email = userData.email ?? userData.userEmail ?? username;
     const user: User = {
-      id: String(userData.id), // Convert number to string
-      username: userData.email.split("@")[0], // Extract username from email
-      email: userData.email,
+      id: String(userData.id ?? userData.userId), // Convert number to string
+      username: email.split("@")[0], // Extract username from email
+      email,
       name: `${userData.firstName} ${userData.lastName}`,
       role: "approver", // Default role
     };
@@ -75,30 +142,31 @@ export const backendApi = {
     const approvalsData = response.data.data || [];
 
     // Transform backend response to Approval type
-    return approvalsData.map((item: any) => ({
-      id: String(item.id),
-      userId: String(item.id), // Using id as userId for now
-      username: item.rawJson?.existingAccountNumber || item.rawJson?.accountNumber || item.rawJson?.accountId || item.subscriptionNumber || item.referenceNumber || "N/A",
-      description: item.reason || "No description",
-      category: item.type || "general",
-      suspensionPolicy: item.type || "none",
-      executionDate: new Date().toISOString(),
-      status:
-        (item.status === "Success" || item.status === "APPROVED")
-          ? ("approved" as const)
-          : (item.status === "Pending" || item.status === "PENDING")
-            ? ("pending" as const)
-            : item.status === "REJECTED"
-              ? ("rejected" as const)
-              : ("pending" as const),
-      timestamp: new Date().toISOString(),
-      rejectionReason: item.reason || undefined,
-      subscriptionNumber: item.subscriptionNumber || (item.rawJson?.subscriptions?.[0]?.subscriptionNumber) || item.referenceNumber || (item.rawJson && item.rawJson.paymentKey) || "",
-      extraFields: {
-        subscriptionNumber: item.subscriptionNumber || (item.rawJson?.subscriptions?.[0]?.subscriptionNumber) || item.referenceNumber || (item.rawJson && item.rawJson.paymentKey) || "",
-        rawJson: item.rawJson || "",
-      },
-    }));
+    return approvalsData.map((item: any) => {
+      const raw = parseRaw(item.rawJson);
+      const subNo = item.subscriptionNumber || raw.subscriptions?.[0]?.subscriptionNumber || item.referenceNumber || raw.paymentKey || "";
+      return {
+        id: String(item.id),
+        userId: String(item.id), // Using id as userId for now
+        username: raw.existingAccountNumber || raw.accountNumber || raw.accountId || item.subscriptionNumber || item.referenceNumber || "N/A",
+        description: item.reason || buildSummary(item.type, raw, item),
+        category: item.type || "general",
+        suspensionPolicy: item.type || "none",
+        executionDate: raw.orderDate || raw.refundDate || normDate(item.createdOn) || new Date().toISOString(),
+        status: mapStatus(item.status),
+        timestamp: normDate(item.createdOn) || new Date().toISOString(),
+        rejectionReason: item.reason || undefined,
+        subscriptionNumber: subNo,
+        summary: buildSummary(item.type, raw, item),
+        accountNumber: raw.existingAccountNumber || raw.accountNumber || "",
+        reference: item.referenceNumber || subNo,
+        reason: item.reason || undefined,
+        decidedOn: normDate(item.approvedOn) || undefined,
+        extraFields: {
+          subscriptionNumber: subNo,
+        },
+      };
+    });
   },
 
   /**
@@ -116,7 +184,7 @@ export const backendApi = {
     console.log("   Data:", JSON.stringify(response.data, null, 2));
 
     const item = response.data.data || response.data;
-    const rawJson = item.rawJson || {};
+    const rawJson = parseRaw(item.rawJson);
 
     // Extract deep fields for display
     let displayFields: any = {};
@@ -219,18 +287,24 @@ export const backendApi = {
       description: desc,
       category: category,
       suspensionPolicy: displayFields["Suspension policy"] || "N/A",
-      executionDate: rawJson.orderDate || item.createdOn || new Date().toISOString(),
-      status: (item.status === "Success" || item.status === "APPROVED")
-        ? "approved"
-        : (item.status === "Pending" || item.status === "PENDING")
-          ? "pending"
-          : (item.status === "Rejected" || item.status === "REJECTED")
-            ? "rejected"
-            : "pending",
-      timestamp: item.createdOn || new Date().toISOString(),
+      executionDate: rawJson.orderDate || rawJson.refundDate || normDate(item.createdOn) || new Date().toISOString(),
+      status: mapStatus(item.status),
+      timestamp: normDate(item.createdOn),
       rejectionReason: item.reason || undefined,
       subscriptionNumber: item.subscriptionNumber || rawJson.subscriptionNumber || item.referenceNumber || (rawJson.subscriptions?.[0]?.referenceNumber) || "",
-      extraFields: displayFields
+      extraFields: displayFields,
+      summary: buildSummary(item.type, rawJson, item),
+      accountNumber: rawJson.existingAccountNumber || rawJson.accountNumber || "",
+      reference: item.referenceNumber || "",
+      reason: item.reason || undefined,
+      decidedOn: normDate(item.approvedOn) || undefined,
+      requestedBy: rawJson.existingAccountNumber ? `Account ${rawJson.existingAccountNumber}` : "",
+      rawJson:
+        typeof item.rawJson === "string"
+          ? (() => {
+            try { return JSON.stringify(JSON.parse(item.rawJson), null, 2); } catch { return item.rawJson; }
+          })()
+          : item.rawJson ? JSON.stringify(item.rawJson, null, 2) : "",
     };
   },
 
@@ -251,7 +325,7 @@ export const backendApi = {
     };
     console.log("📤 Approving Request:", JSON.stringify(payload));
     const response = await apiClient.post("/approval/modifyStatus", payload);
-    return response.data.approval || response.data; // Adjust based on actual response wrapper
+    return assertDecision(response.data, "Zuora could not apply this change");
   },
 
   /**
@@ -271,7 +345,7 @@ export const backendApi = {
     };
     console.log("📤 Rejecting Request:", JSON.stringify(payload));
     const response = await apiClient.post("/approval/modifyStatus", payload);
-    return response.data.approval || response.data;
+    return assertDecision(response.data, "Could not reject this request");
   },
 
   /**

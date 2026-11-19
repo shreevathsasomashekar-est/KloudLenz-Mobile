@@ -1,154 +1,95 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { timeAgo, typeMeta } from "../constants/requestMeta";
+import { F, T } from "../constants/theme";
 import { Approval } from "../types/approval";
+import { StatusPill } from "./StatusPill";
+import { TypeIcon } from "./TypeIcon";
 
 interface ApprovalCardProps {
   approval: Approval;
   onPress: () => void;
 }
 
-export const ApprovalCard: React.FC<ApprovalCardProps> = ({
-  approval,
-  onPress,
-}) => {
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "#FFA500";
-      case "approved":
-        return "#4CAF50";
-      case "rejected":
-        return "#F44336";
-      default:
-        return "#999";
-    }
-  };
+export const ApprovalCard: React.FC<ApprovalCardProps> = ({ approval, onPress }) => {
+  const meta = typeMeta(approval.category);
+  const pending = approval.status === "pending";
+  const showReason = (approval.status === "failed" || approval.status === "rejected") && !!approval.reason;
 
   return (
-    <Pressable onPress={onPress} style={styles.card}>
-      <View style={styles.topRow}>
-        <Text style={styles.username} numberOfLines={1}>
-          {approval.subscriptionNumber || approval.username}
-        </Text>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: getStatusColor(approval.status) },
-          ]}
-        >
-          <Text style={styles.statusText}>{approval.status}</Text>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.card, pending && styles.cardPending, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`${meta.label}, ${approval.summary || approval.description}, ${approval.status}`}
+    >
+      <TypeIcon type={approval.category} size={42} />
+      <View style={styles.body}>
+        <View style={styles.topRow}>
+          <Text style={styles.type} numberOfLines={1}>{meta.label}</Text>
+          <Text style={styles.time}>{timeAgo(approval.timestamp)}</Text>
         </View>
-      </View>
-
-
-
-      <View style={styles.fieldRow}>
-        <Text style={styles.fieldLabel}>Category:</Text>
-        <Text style={styles.fieldValue}>
-          {approval.category ?? "Service suspension"}
+        <Text style={styles.summary} numberOfLines={2}>
+          {approval.summary || approval.description}
         </Text>
+        <View style={styles.metaRow}>
+          {!!approval.accountNumber && (
+            <View style={styles.chip}>
+              <MaterialCommunityIcons name="domain" size={11} color={T.text2} />
+              <Text style={styles.chipText}>{approval.accountNumber}</Text>
+            </View>
+          )}
+          <StatusPill status={approval.status} />
+        </View>
+        {showReason && (
+          <Text style={styles.reason} numberOfLines={2}>
+            {approval.reason}
+          </Text>
+        )}
       </View>
-
-      <View style={styles.fieldRow}>
-        <Text style={styles.fieldLabel}>Description:</Text>
-        <Text style={[styles.fieldValue, styles.description]} numberOfLines={2}>
-          {approval.description}
-        </Text>
-      </View>
-
-      <Text style={styles.timestamp}>
-        {new Date(approval.timestamp).toLocaleString()}
-      </Text>
+      <MaterialCommunityIcons name="chevron-right" size={20} color={T.text3} style={styles.chevron} />
     </Pressable>
   );
 };
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#f4f6f8",
-    borderRadius: 8,
-    marginHorizontal: 16,
-    marginVertical: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: "#d0d0d0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  topRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    gap: 12,
+    backgroundColor: T.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: T.cardBorder,
+    padding: 14,
+    marginHorizontal: 16,
     marginBottom: 10,
   },
-  username: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#1a1a1a",
+  cardPending: { borderLeftWidth: 3, borderLeftColor: T.orange },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.995 }] },
+  body: { flex: 1, gap: 4 },
+  topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
+  type: {
     flex: 1,
-    lineHeight: 22,
+    fontFamily: F.semibold,
+    fontSize: 10.5,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: T.text3,
   },
-  userId: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 4,
-    fontWeight: "500",
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-    marginLeft: 12,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "capitalize",
-  },
-  description: {
-    fontSize: 14,
-    color: "#444",
-    marginBottom: 6,
-    lineHeight: 20,
-  },
-  category: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 6,
-  },
-  fieldRow: {
+  time: { fontFamily: F.medium, fontSize: 11, color: T.text3 },
+  summary: { fontFamily: F.semibold, fontSize: 14.5, lineHeight: 20, color: T.text },
+  metaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  chip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingBottom: 8,
+    gap: 4,
+    backgroundColor: T.greyBg,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
   },
-  fieldLabel: {
-    fontSize: 13,
-    color: "#666",
-    fontWeight: "600",
-    width: 100,
-  },
-  fieldValue: {
-    fontSize: 14,
-    color: "#333",
-    flex: 1,
-    textAlign: "left",
-    lineHeight: 20,
-  },
-  timestamp: {
-    fontSize: 12,
-    color: "#999",
-    fontWeight: "500",
-    marginTop: 6,
-    lineHeight: 16,
-  },
-  requestBold: {
-    fontWeight: "700",
-    color: "#1a1a1a",
-  },
+  chipText: { fontFamily: F.medium, fontSize: 11, color: T.text2 },
+  reason: { fontFamily: F.regular, fontSize: 12, lineHeight: 17, color: T.red, marginTop: 4 },
+  chevron: { alignSelf: "center" },
 });
